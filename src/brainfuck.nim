@@ -2,15 +2,22 @@
 # uses this file as the main entry point of the application.
 
 import macros
+import streams
 
 ## we need overflow-able chars
 {.push overflowChecks: off.}
-proc xinc(c: var char) = inc c
-proc xdec(c: var char) = dec c
+proc bfinc*(c: var char) = inc c
+proc bfdec*(c: var char) = dec c
 {.pop.}
 
 
-proc interpret*(code: string) =
+proc readCharEOF*(input: Stream): char =
+    ## readChar and converts 0 to -1 for brainfuck compat
+    result = input.readChar
+    if result == '\0':
+        result = '\255';
+
+proc interpret*(code: string; input, output: Stream) =
     ## As crazy as it seems, this proc interprets some brainfuck `code` 
     ## passed in as a string. 
     ## ...by leveraging the power of stdin *and* stdout (aka dual wielding) 
@@ -39,12 +46,12 @@ proc interpret*(code: string) =
                 return tape[tapePos] != '\0'
             elif not skip:
                 case code[codePos]
-                of '+': xinc tape[tapePos]
-                of '-': xdec tape[tapePos]
+                of '+': bfinc tape[tapePos]
+                of '-': bfdec tape[tapePos]
                 of '>': inc tapePos
                 of '<': dec tapePos
-                of '.': write stdout, tape[tapePos]
-                of ',': tape[tapePos] = readChar stdin
+                of '.': write output, tape[tapePos]
+                of ',': tape[tapePos] = input.readCharEOF
                 else: discard
   
             inc codePos
@@ -52,23 +59,45 @@ proc interpret*(code: string) =
     discard run()
 
 
-proc compile(code: string): NimNode {.compileTime.} =
+proc interpret*(code, input: string): string =
+    ## Interprets the brainfuck `code` string, reading from `input` and returning
+    ## the result directly.
+    var outStream = newStringStream()
+    interpret(code, input.newStringStream, outStream)
+    result = outStream.data
+
+
+proc interpret*(code: string) =
+    ## Interprets the brainfuck `code` string, reading from stdin and writing to
+    ## stdout.
+    interpret(code, stdin.newFileStream, stdout.newFileStream)  
+
+
+proc compile(code, input, output: string): NimNode {.compiletime.} =
     var stmts = @[newStmtList()]
 
-    template addStmt(text): void =
+    template addStmt(text) =
         stmts[stmts.high].add parseStmt(text)
     
+    addStmt """
+      when not compiles(newStringStream()):
+        static:
+          quit("Error: Import the streams module to compile brainfuck code", 1)
+    """
+
     addStmt "var tape: array[1_000_000, char]"
     addStmt "var tapePos = 0"
+    addStmt "var inpStream = " & input
+    addStmt "var outStream = " & output
 
     for c in code:
         case c
-        of '+': addStmt "xinc tape[tapePos]"
-        of '-': addStmt "xdec tape[tapePos]"
+        of '+': addStmt "bfinc tape[tapePos]"
+        of '-': addStmt "bfdec tape[tapePos]"
         of '>': addStmt "inc tapePos"
         of '<': addStmt "dec tapePos"
-        of '.': addStmt "stdout.write tape[tapePos]"
-        of ',': addStmt "tape[tapePos] = stdin.readChar"
+        of '.': addStmt "outStream.write tape[tapePos]"
+        of ',': addStmt "tape[tapePos] = inpStream.readCharEOF"
         of '[': stmts.add newStmtList()
         of ']': 
             var loop = newNimNode(nnkWhileStmt)
@@ -76,15 +105,24 @@ proc compile(code: string): NimNode {.compileTime.} =
             loop.add stmts.pop
             stmts[stmts.high].add loop
         else: discard
-    
+
     result = stmts[0]
 
 
-macro compileString*(code: string): void =
-    compile code.strval
+macro compileString*(code: string) =
+    compile code.strval, "stdin.newFileStream", "stdout.newFileStream"
 
-macro compileFile*(fileName: string): void =
-    compile staticRead(fileName.strVal)
+macro compileString*(code: string; input, output: untyped) =
+    result = compile($code, "newStringStream(" & $input & ")", "newStringStream()")
+    result.add parseStmt($output & " = outStream.data")
+
+macro compileFile*(fileName: string) =
+    compile(staticRead(fileName.strVal), "stdin.newFileStream", "stdout.newFileStream")
+
+macro compileFile*(fileName: string; input, output: untyped) = 
+    result = compile(staticRead(fileName.strVal), 
+        "newStringStream(" & $input & ")", "newStringStream()")
+    result.add parseStmt($output & " = outStream.data")
 
 # this stuff does not exists if we are included as lib
 when isMainModule:
@@ -101,17 +139,17 @@ when isMainModule:
 
     # all your docopt versions are 69ers! pretty pog!
     let doc = """
-    brainfuck
+brainfuck
 
-    Usage:
-        brainfuck mbrot
-        brainfuck i [<file.b>]
-        brainfuck (-h | --help)
-        brainfuck (-v | --version)
-    
-    Options:
-        -h --help     Show this screen
-        -v --version  Show version
+Usage:
+    brainfuck mbrot
+    brainfuck i [<file.b>]
+    brainfuck (-h | --help)
+    brainfuck (-v | --version)
+
+Options:
+    -h --help     Show this screen
+    -v --version  Show version
     """
 
     let args = docopt(doc, version = longProgram)
