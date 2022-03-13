@@ -1,6 +1,8 @@
 # This is just an example to get you started. A typical binary package
 # uses this file as the main entry point of the application.
 
+import macros
+
 ## we need overflow-able chars
 {.push overflowChecks: off.}
 proc xinc(c: var char) = inc c
@@ -47,19 +49,86 @@ proc interpret*(code: string) =
   
             inc codePos
 
-    echo run()
+    discard run()
 
 
+proc compile(code: string): NimNode {.compileTime.} =
+    var stmts = @[newStmtList()]
+
+    template addStmt(text): void =
+        stmts[stmts.high].add parseStmt(text)
+    
+    addStmt "var tape: array[1_000_000, char]"
+    addStmt "var tapePos = 0"
+
+    for c in code:
+        case c
+        of '+': addStmt "xinc tape[tapePos]"
+        of '-': addStmt "xdec tape[tapePos]"
+        of '>': addStmt "inc tapePos"
+        of '<': addStmt "dec tapePos"
+        of '.': addStmt "stdout.write tape[tapePos]"
+        of ',': addStmt "tape[tapePos] = stdin.readChar"
+        of '[': stmts.add newStmtList()
+        of ']': 
+            var loop = newNimNode(nnkWhileStmt)
+            loop.add parseExpr("tape[tapePos] != '\\0'")
+            loop.add stmts.pop
+            stmts[stmts.high].add loop
+        else: discard
+    
+    result = stmts[0]
+
+
+macro compileString*(code: string): void =
+    compile code.strval
+
+macro compileFile*(fileName: string): void =
+    compile staticRead(fileName.strVal)
+
+# this stuff does not exists if we are included as lib
 when isMainModule:
-    import os
-  
-    let code = if paramCount() > 0: readFile paramStr(1)
-               else: readAll stdin
+    import docopt
+    
+    const
+        program = "brainfuck"
+        version = "4.20.69"
+        # compiler has cat powers
+        longProgram = program & " " & version
+    
+    # this is compiled at compile time! how about that ??
+    proc mbrot = compileFile "../examples/mandelbrot.b"
 
-    echo("* brainfuck v69.420 *")
+    # all your docopt versions are 69ers! pretty pog!
+    let doc = """
+    brainfuck
 
-    echo "--------------------------------------------------------------------------------"
-    echo code
-    echo "--------------------------------------------------------------------------------"
+    Usage:
+        brainfuck mbrot
+        brainfuck i [<file.b>]
+        brainfuck (-h | --help)
+        brainfuck (-v | --version)
+    
+    Options:
+        -h --help     Show this screen
+        -v --version  Show version
+    """
 
-    interpret code
+    let args = docopt(doc, version = longProgram)
+
+    if args["mbrot"]:
+        mbrot()
+
+    elif args["i"]:
+
+        let code = 
+            # dont let the $ trigger your inner haskell
+            if args["<file.b>"]: readFile $args["<file.b>"]
+            else: readAll stdin
+
+        echo longProgram
+        echo "--------------------------------------------------------------------------------"
+        echo code
+        echo "--------------------------------------------------------------------------------"
+
+        interpret code
