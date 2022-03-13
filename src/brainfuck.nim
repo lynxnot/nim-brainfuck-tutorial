@@ -12,7 +12,7 @@ proc interpret*(code: string) =
     ## As crazy as it seems, this proc interprets some brainfuck `code` 
     ## passed in as a string. 
     ## ...by leveraging the power of stdin *and* stdout (aka dual wielding) 
-    ## creates an interactive environment that, sooner or later (aka à la Python),
+    ## creates an interactive environment that, sooner or later (à la Python),
     ## spits out whatever the brainfuck machinery decides to do.
     ## 
     var
@@ -56,7 +56,7 @@ when isMainModule:
     let code = if paramCount() > 0: readFile paramStr(1)
                else: readAll stdin
 
-    echo("* brainfuck v69.420")
+    echo("* brainfuck v69.420 *")
 
     echo "--------------------------------------------------------------------------------"
     echo code
